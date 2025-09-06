@@ -1,0 +1,104 @@
+name: 'bastion wali pipeline'
+
+trigger: none
+
+pool: 
+  name: humaraPool
+
+variables:
+  WORK_DIR: '$(System.DefaultWorkingDirectory)/environment/dev'
+
+stages:
+  - stage: initValidatePlan
+    displayName: 'Terraform init/validate/plan'
+    jobs:
+      - job: jobInitValidatePlan
+        displayName: 'Init/validate/plan job'
+        steps:
+        - task: TerraformTask@5
+          displayName: 'Terraform Init'
+          inputs:
+            provider: 'azurerm'
+            command: 'init'
+            workingDirectory: '$(WORK_DIR)'
+            backendServiceArm: 'humaraConnect'
+            backendAzureRmStorageAccountName: 'terrastorage1'
+            backendAzureRmContainerName: 'terra-remote'
+            backendAzureRmKey: 'dev.tfstate'
+
+        - task: TerraformTask@5
+          displayName: 'Terraform Validate'
+          inputs:
+            provider: 'azurerm'
+            command: 'validate'
+            workingDirectory: '$(WORK_DIR)'
+
+        - task: TerraformTask@5
+          displayName: 'Terraform Plan'
+          inputs:
+            provider: 'azurerm'
+            command: 'plan'
+            workingDirectory: '$(WORK_DIR)'
+            environmentServiceNameAzureRM: 'humaraConnect'
+         
+
+
+  - stage: codeScanning
+    displayName: 'Static Infra Code Scanning'
+    jobs:
+      - job: tfsecScan
+        displayName: 'Tfsec scan'
+        steps:
+        - task: tfsec@1
+          continueOnError: true
+          displayName: 'tfsec scanning task'
+          inputs:
+            version: 'v1.26.0'
+            dir: '$(System.DefaultWorkingDirectory)'
+
+
+  - stage: apply
+    dependsOn: codeScanning
+    displayName: 'Terraform Apply'
+    jobs:
+      - job: manualApproval
+        displayName: 'Manual Approval'
+        pool: server
+        steps:
+        - task: ManualValidation@1
+          displayName: 'Manual Validation for manager'
+          inputs:
+            notifyUsers: 'achinta.dutta04@gmail.com'
+            approvers: 'achinta.dutta04@gmail.com'
+
+      - job: apply
+        dependsOn: manualApproval
+        pool:
+         vmImage: ubuntu-latest
+        condition: succeeded()
+        displayName: 'Terraform Apply job'
+        steps:
+        - task: TerraformInstaller@1
+          displayName: 'terraform Install'
+          inputs:
+            terraformVersion: 'latest'
+        - task: TerraformTask@5
+          displayName: 'Terraform Init'
+          inputs:
+            provider: 'azurerm'
+            command: 'init'
+            workingDirectory: '$(WORK_DIR)'
+            backendServiceArm: 'humaraConnect'
+            backendAzureRmStorageAccountName: 'terrastorage1'
+            backendAzureRmContainerName: 'terra-remote'
+            backendAzureRmKey: 'dev.tfstate'
+
+        - task: TerraformTask@5
+          displayName: 'Terraform Apply'
+          inputs:
+            provider: 'azurerm'
+            command: 'apply'
+            workingDirectory: '$(WORK_DIR)'
+            environmentServiceNameAzureRM: 'humaraConnect'
+
+  
